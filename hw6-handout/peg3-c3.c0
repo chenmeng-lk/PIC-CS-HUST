@@ -1,0 +1,168 @@
+/*
+ * Peg solitaire solver
+ *
+ * 15-122 Principles of Imperative Computation */
+
+#use <args>
+#use <conio>
+#use <util>
+
+
+typedef int move;
+/*这里使用整数的四元组（对应棋子在操作前、
+后的行号、列号）实现
+压缩进单个int，每8位存储一个行列信息*/
+int row_start(move m)
+{
+    return m&0xff;
+}
+
+int col_start(move m)
+{
+    return (m>>8)&0xff;
+}
+
+int row_end(move m)
+{
+    return (m>>16)&0xff;
+}
+
+int col_end(move m)
+{
+    return (m>>24)&0xff;
+}
+
+
+/*考虑当前棋局的所有合法操作，产生所有可能的
+下一步操作，返回一个包括这些操作的新堆栈。*/
+stack find_all_move(board B,int[] dx,int[] dy)
+{
+    stack new=stack_new();
+    for (int row = 0; row < 8; row++)
+        for (int col = 0; col < 8; col++)
+            if(B[8*row+col]==0)//寻找空格的上下左右
+                for(int s=0;s<4;s++){
+                    int row2=row+dx[s];
+                    int col2=col+dy[s];
+                    if(0<=row2&&row2<8&&0<=col2&&col2<8){
+                        int j = 8*row+col;
+                        int i = 8*row2+col2;
+                        int k = (i+j)>>1;
+                        if(B[i]==1&&B[k]==1){
+                            move m=row2|(col2<<8)|(row<<16)|(col<<24);
+                            push(new,m);
+                        }     
+                    }        
+                }
+    return new;
+}
+/*递归的辅助函数solve，它将被peg_solve调用。这个辅助
+函数的参数应该包括棋盘、当前的操作堆栈、棋盘上剩下
+的棋子个数。在有解时辅助函数solve返回1；
+它也应该要在堆栈S中增加操作。*/
+int solve(board B,stack S,int number_pegs,ht H,int i1,int i2,int[] dx,int[] dy)
+//@requires is_board(B);
+//@ensures is_board(B);
+//@ensures \result >= 1;
+{
+    /*当我们尝试解一个棋盘式，我们先检查它是否
+    已经被记录为无解；如果确实是这样，我们马上
+    返回哈希表中存储的答案。*/
+    struct two_ints* now_elem=alloc(struct two_ints);
+    now_elem->i1=i1;
+    now_elem->i2=i2;
+    now_elem->best_num_pegs=number_pegs;
+    struct two_ints* lookup=ht_lookup(H,now_elem);
+    if(lookup!=NULL){//已记录为无解
+        return lookup->best_num_pegs;
+    }
+    //有解，递归
+    stack s_move=find_all_move(B,dx,dy);
+    //当前棋盘所有可能的移动操作
+    if (stack_empty(s_move)) {
+    //栈空说明当前棋盘无法移动棋子，直接返回剩余棋子数
+        if (number_pegs == 1) {
+            printf("size = %d\n", ht_size(H));
+        }
+        return number_pegs;
+    }
+    //在返回之前，棋盘必须返回它被调用时的状态
+    //每次比较剩余棋子数，记录下最小的即为最终答案
+    /*如果走到一个死胡同，没有任何下一步操作了，那么
+    代码应该撤销最后一步操作，然后尝试另一个操作。如
+    果那个操作也失败了，那就撤销那一步并继续这个过程*/
+    while(!stack_empty(s_move))
+    {
+        move m = pop(s_move);
+        int row_start = row_start(m);
+        int col_start = col_start(m);
+        int row_end = row_end(m);
+        int col_end = col_end(m);
+        //位运算提速
+        int i = (row_start<<3)+col_start;
+        int k = (row_end<<3)+col_end;
+        int j = (i+k)>>1;
+        B[i] = 0;
+        B[j] = 0;
+        B[k] = 1;
+        //根据索引更新i1、i2
+        int ii1=i1;
+        int ii2=i2;
+        if(i<32) ii1^=(1<<i);//对应位异或1
+        else ii2^=(1<<(i-32));
+        if(j<32) ii1^=(1<<j);
+        else ii2^=(1<<(j-32));
+        if(k<32) ii1^=(1<<k);
+        else ii2^=(1<<(k-32));
+        int ans = solve(B, S, number_pegs - 1,H,ii1,ii2,dx,dy);
+        if(ans<now_elem->best_num_pegs) now_elem->best_num_pegs=ans;
+        if(ans==1){//只有解出棋盘的那些操作才能入栈
+            push(S,m);
+            return 1;
+        }
+        //回溯，前面没返回1说明这个操作无解，回到上一
+        //个状态，然后while又取出下一个可能得操作测试
+        B[i] = 1;
+        B[j] = 1;
+        B[k] = 0;
+    }
+    //未返回1时则无解，记录进哈希表
+    ht_insert(H,now_elem);
+    return now_elem->best_num_pegs;//返回记录的最少棋子数
+}
+
+int peg_solve(board B, stack S)
+//@requires is_board(B);
+//@requires num_pegs(B) >= 1;
+//@requires stack_empty(S);
+//@ensures is_board(B);
+//@ensures \result >= 1;
+{
+    ht H = ht_new(10000000);
+    /*把棋盘压缩成一个紧密的表达，同时包含足够的信息，
+    使得对于一个特定问题，两个棋盘只有在形态完全相同
+    时才对应同一个key。这里64个点-1 0 1我们把-1变成
+    0，然后按位存入2个int*/
+    int i1 = 0;
+    int i2 = 0;
+    /*棋盘上每个棋子为1，-1和0都看成0，因为-1永远不能放
+    棋子，对一个棋盘求解时永远不变，也就是两个状态中对
+    应的-1位置都一样，那用0替代没问题。不同的棋盘对应
+    棋子和空洞不同，也即1不同，而我们哈希表只需要判断
+    两个棋盘是否一样，一样的棋盘把-1看做0无疑仍一样，
+    不同的棋盘显然是1不一样，那么改-1毫无影响*/
+    for (int i = 0; i < 32; i++) 
+        i1 |= (max(B[i],0) << i);
+    for (int i = 32; i < 64; i++) 
+        i2 |= (max(B[i],0) << (i-32));
+    //实现寻找当前棋子上下左右偏移的数组
+//不放在find_all_move函数中是为了避免多次创建数组占用空间
+    int[] dx=alloc_array(int, 4);
+    int[] dy=alloc_array(int, 4);
+    dx[0]=-2;dx[1]=2;dx[2]=0;dx[3]=0;
+    dy[0]=0;dy[1]=0;dy[2]=-2;dy[3]=2;
+    return solve(B,S,num_pegs(B),H,i1,i2,dx,dy);
+}
+
+
+

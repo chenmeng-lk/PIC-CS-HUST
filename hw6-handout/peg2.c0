@@ -1,0 +1,126 @@
+/*
+ * Peg solitaire solver
+ *
+ * 15-122 Principles of Imperative Computation */
+
+#use <args>
+#use <conio>
+#use <util>
+
+
+typedef int move;
+/*这里使用整数的四元组（对应棋子在操作前、
+后的行号、列号）实现
+压缩进单个int，每8位存储一个行列信息*/
+int row_start(move m)
+{
+  return m&0xff;
+}
+
+int col_start(move m)
+{
+  return (m>>8)&0xff;
+}
+
+int row_end(move m)
+{
+  return (m>>16)&0xff;
+}
+
+int col_end(move m)
+{
+  return (m>>24)&0xff;
+}
+
+
+/*考虑当前棋局的所有合法操作，产生所有可能的
+下一步操作，返回一个包括这些操作的新堆栈。*/
+stack find_all_move(board B)
+{
+  stack new=stack_new();
+  //实现寻找当前棋子上下左右偏移的数组
+  int[] dx=alloc_array(int, 4);
+  int[] dy=alloc_array(int, 4);
+  dx[0]=-2;dx[1]=2;dx[2]=0;dx[3]=0;
+  dy[0]=0;dy[1]=0;dy[2]=-2;dy[3]=2;
+  for (int row = 0; row < 8; row++)
+    for (int col = 0; col < 8; col++)
+      if(B[(row<<3)+col]==1)//寻找棋子的上下左右
+      {
+        for(int s=0;s<4;s++){
+          int row2=row+dx[s];
+          int col2=col+dy[s];
+          if(0<=row2&&row2<8&&0<=col2&&col2<8){
+            int i = (row<<3)+col;
+            int k = (row2<<3)+col2;
+            int j = (i+k)>>1;
+            if(B[j]==1&&B[k]==0){
+              move m=row|(col<<8)|(row2<<16)|(col2<<24);
+              push(new,m);
+            }     
+          }        
+        }
+      }
+  return new;
+}
+/*递归的辅助函数solve，它将被peg_solve调用。这个辅助
+函数的参数应该包括棋盘、当前的操作堆栈、棋盘上剩下
+的棋子个数。在有解时辅助函数solve返回1；
+它也应该要在堆栈S中增加操作。*/
+int solve(board B,stack S,int number_pegs)
+//@requires is_board(B);
+//@ensures is_board(B);
+//@ensures \result >= 1;
+{
+  stack s_move=find_all_move(B);
+  //当前棋盘所有可能的移动操作
+  if (stack_empty(s_move)) {
+    //栈空说明当前棋盘无法移动棋子，直接返回剩余棋子数
+    return number_pegs;
+  }
+  //在返回之前，棋盘必须返回它被调用时的状态
+  //每次比较剩余棋子数，记录下最小的即为最终答案
+  int min_ans=number_pegs;
+  /*如果走到一个死胡同，没有任何下一步操作了，那么
+  代码应该撤销最后一步操作，然后尝试另一个操作。如
+  果那个操作也失败了，那就撤销那一步并继续这个过程。*/
+  while(!stack_empty(s_move))
+  {
+    move m = pop(s_move);
+    int row_start = row_start(m);
+    int col_start = col_start(m);
+    int row_end = row_end(m);
+    int col_end = col_end(m);
+    int i = (row_start<<3)+col_start;
+    int k = (row_end<<3)+col_end;
+    int j = (i+k)>>1;
+    B[i] = 0;
+    B[j] = 0;
+    B[k] = 1;
+    int ans = solve(B, S, number_pegs - 1);
+    if(ans<min_ans) min_ans=ans;
+    if(ans==1){//只有解出棋盘的那些操作才能入栈
+        push(S,m);
+        return 1;
+    }
+    //回溯，前面没返回1说明这个操作无解，回到上一
+    //个状态，然后while又取出下一个可能得操作测试
+    B[i] = 1;
+    B[j] = 1;
+    B[k] = 0;
+  }
+  return min_ans;//未返回1时则返回的是最少棋子数
+}
+
+int peg_solve(board B, stack S)
+//@requires is_board(B);
+//@requires num_pegs(B) >= 1;
+//@requires stack_empty(S);
+//@ensures is_board(B);
+//@ensures \result >= 1;
+{
+  return solve(B,S,num_pegs(B));
+}
+
+
+
